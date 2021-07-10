@@ -20,15 +20,14 @@ import configparser
 import json
 import threading
 import time
-
-import pyaudio
-import websocket
-from websocket._abnf import ABNF
 from ibm_watson import AssistantV1
 from ibm_watson import TextToSpeechV1
 from ibm_cloud_sdk_core.authenticators import IAMAuthenticator
 from playsound import playsound
-import assistant_setup
+import pyaudio
+import websocket
+from websocket._abnf import ABNF
+
 
 apikey = 'W2MzUqimzxr1uy_zXyjSFWHg8Qo_ylm4TaihzK2v53Uo'
 url = 'https://api.eu-gb.text-to-speech.watson.cloud.ibm.com/instances/69ba766b-a0b8-46fd-a6c4-1473976a9016'
@@ -36,8 +35,9 @@ authenticator = IAMAuthenticator(apikey)
 tts = TextToSpeechV1(authenticator=authenticator)
 tts.set_service_url(url)
 
+
+txt = ""
 CHUNK = 1024
-txt = "was the service provided good ?"
 FORMAT = pyaudio.paInt16
 # Even if your default input is multi channel (like a webcam mic),
 # it's really important to only record 1 channel, as the STT service
@@ -51,7 +51,7 @@ RATE = 44100
 RECORD_SECONDS = 5
 FINALS = []
 LAST = None
-file = open("output.txt","w")
+
 REGION_MAP = {
     'us-east': 'gateway-wdc.watsonplatform.net',
     'us-south': 'stream.watsonplatform.net',
@@ -61,13 +61,12 @@ REGION_MAP = {
     'jp-tok': 'gateway-syd.watsonplatform.net',
 }
 
+file = open("output.txt","w")
 
 def read_audio(ws, timeout):
     """Read audio and sent it to the websocket port.
-
     This uses pyaudio to read from a device in chunks and send these
     over the websocket wire.
-
     """
     global RATE
     p = pyaudio.PyAudio()
@@ -84,9 +83,8 @@ def read_audio(ws, timeout):
                     rate=RATE,
                     input=True,
                     frames_per_buffer=CHUNK)
-
-    print("* recording")
     file.write('* recording')
+    print("* recording")
     rec = timeout or RECORD_SECONDS
 
     for i in range(0, int(RATE / CHUNK * rec)):
@@ -96,11 +94,14 @@ def read_audio(ws, timeout):
         # need to indicate that otherwise the stream service
         # interprets this as text control messages.
         ws.send(data, ABNF.OPCODE_BINARY)
+
     # Disconnect the audio stream
     stream.stop_stream()
     stream.close()
+
     print("* done recording")
     file.write('\n * done recording')
+    file.close()
     # In order to get a final response from STT we send a stop, this
     # will force a final=True return message.
     data = {"action": "stop"}
@@ -115,7 +116,6 @@ def read_audio(ws, timeout):
 
 def on_message(self, msg):
     """Print whatever messages come in.
-
     While we are processing any non trivial stream of speech Watson
     will start chunking results into bits of transcripts that it
     considers "final", and start on a new stretch. It's not always
@@ -123,6 +123,7 @@ def on_message(self, msg):
     processing text, any time we see a final chunk, we need to save it
     off for later.
     """
+    global txt
     global LAST
     data = json.loads(msg)
     if "results" in data:
@@ -134,8 +135,8 @@ def on_message(self, msg):
         # This prints out the current fragment that we are working on
         print(data['results'][0]['alternatives'][0]['transcript'])
         file.write("\n" + data['results'][0]['alternatives'][0]['transcript'])
-
-
+    txt = "".join([x['results'][0]['alternatives'][0]['transcript']
+                          for x in FINALS])
 def on_error(self, error):
     """Print any errors."""
     print(error)
@@ -149,7 +150,6 @@ def on_close(ws):
     transcript = "".join([x['results'][0]['alternatives'][0]['transcript']
                           for x in FINALS])
     print(transcript)
-
 
 
 def on_open(ws):
@@ -186,7 +186,7 @@ def get_url():
     region = config.get('auth', 'region')
     host = REGION_MAP[region]
     return ("wss://{}/speech-to-text/api/v1/recognize"
-           "?model=en-US_BroadbandModel").format(host)
+           "?model=en-AU_BroadbandModel").format(host)
 
 def get_auth():
     config = configparser.RawConfigParser()
@@ -203,7 +203,6 @@ def parse_args():
     # parser.add_argument('-v', '--verbose', action='store_true')
     args = parser.parse_args()
     return args
-
 
 
 def main():
@@ -232,13 +231,11 @@ def main():
     # 6 seconds in the dedicated thread).
     ws.run_forever()
 
-    file.close()
-
     with open('./speech.mp3', 'wb') as audio_file:
-        res = tts.synthesize('was the service provided good ?', accept='audio/mp3', voice='en-US_AllisonV3Voice').get_result()
+        res = tts.synthesize(txt, accept='audio/mp3', voice='en-US_AllisonV3Voice').get_result()
         audio_file.write(res.content)
-    print('was the service provided good ?')
-    playsound('speech.mp3')
+    print(txt)
+    playsound('speech.mp3')    
 
 if __name__ == "__main__":
     main()
